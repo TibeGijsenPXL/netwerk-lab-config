@@ -1,0 +1,73 @@
+---
+# Task 37 – NETCONF (Ansible)
+# Haalt YANG-XML configuratie op uit GitHub en deployt via NETCONF
+#
+# Vereisten:
+#   pip install ansible
+#   ansible-galaxy collection install cisco.ios ansible.netcommon
+#
+# Gebruik:
+#   ansible-playbook task37_netconf_ansible.yml
+
+- name: "Task 37 - IOS-XE configuratie via NETCONF vanuit GitHub"
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    router_host: "192.168.56.103"
+    router_port: 830
+    router_user: "admin"
+    router_pass: "admin"
+    github_raw_url: "https://raw.githubusercontent.com/TibeGijsenPXL/netwerk-lab-config/main/netconf_config.xml"
+    config_file: "/tmp/netconf_config.xml"
+
+  tasks:
+
+    - name: "Stap 1 - Configuratie ophalen uit GitHub"
+      ansible.builtin.get_url:
+        url: "{{ github_raw_url }}"
+        dest: "{{ config_file }}"
+        mode: '0644'
+      register: download_result
+
+    - name: "Toon download resultaat"
+      ansible.builtin.debug:
+        msg: "Configuratie opgehaald: {{ config_file }}"
+
+    - name: "Stap 2 - Lees XML configuratie in"
+      ansible.builtin.set_fact:
+        xml_config: "{{ lookup('file', config_file) }}"
+
+    - name: "Stap 3 - Deploy configuratie via NETCONF"
+      ansible.netcommon.netconf_config:
+        host: "{{ router_host }}"
+        port: "{{ router_port }}"
+        username: "{{ router_user }}"
+        password: "{{ router_pass }}"
+        hostkey_verify: false
+        content: "{{ xml_config }}"
+        target: running
+      register: netconf_result
+
+    - name: "Toon NETCONF resultaat"
+      ansible.builtin.debug:
+        var: netconf_result
+
+    - name: "Stap 4 - Verificeer hostname via NETCONF get"
+      ansible.netcommon.netconf_get:
+        host: "{{ router_host }}"
+        port: "{{ router_port }}"
+        username: "{{ router_user }}"
+        password: "{{ router_pass }}"
+        hostkey_verify: false
+        filter: |
+          <filter>
+            <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
+              <hostname/>
+            </native>
+          </filter>
+      register: verificatie
+
+    - name: "Toon verificatie resultaat"
+      ansible.builtin.debug:
+        msg: "Configuratie succesvol gedeployd via NETCONF vanuit GitHub"

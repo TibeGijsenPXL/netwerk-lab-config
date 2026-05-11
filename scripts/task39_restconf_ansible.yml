@@ -1,0 +1,170 @@
+---
+# Task 39 – RESTCONF (Ansible)
+# Haalt YANG-JSON configuratie op uit GitHub en deployt via RESTCONF
+#
+# Vereisten:
+#   pip install ansible
+#
+# Gebruik:
+#   ansible-playbook task39_restconf_ansible.yml
+
+- name: "Task 39 - IOS-XE configuratie via RESTCONF vanuit GitHub"
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    router_host: "192.168.56.103"
+    router_user: "admin"
+    router_pass: "admin"
+    restconf_base: "https://{{ router_host }}/restconf/data"
+    github_raw_url: "https://raw.githubusercontent.com/TibeGijsenPXL/netwerk-lab-config/main/restconf_config.json"
+    config_file: "/tmp/restconf_config.json"
+    headers:
+      Content-Type: "application/yang-data+json"
+      Accept: "application/yang-data+json"
+
+  tasks:
+
+    - name: "Stap 1 - Configuratie ophalen uit GitHub"
+      ansible.builtin.get_url:
+        url: "{{ github_raw_url }}"
+        dest: "{{ config_file }}"
+        mode: '0644'
+
+    - name: "Stap 2 - JSON configuratie inladen"
+      ansible.builtin.set_fact:
+        router_config: "{{ lookup('file', config_file) | from_json }}"
+
+    - name: "Toon opgehaalde configuratie"
+      ansible.builtin.debug:
+        msg: "Configuratie opgehaald voor hostname: {{ router_config['Cisco-IOS-XE-native:native']['hostname'] }}"
+
+    - name: "Stap 3a - Hostname configureren via RESTCONF"
+      ansible.builtin.uri:
+        url: "{{ restconf_base }}/Cisco-IOS-XE-native:native/hostname"
+        method: PUT
+        user: "{{ router_user }}"
+        password: "{{ router_pass }}"
+        force_basic_auth: true
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          "Cisco-IOS-XE-native:hostname": "{{ router_config['Cisco-IOS-XE-native:native']['hostname'] }}"
+        validate_certs: false
+        status_code: [200, 201, 204]
+      register: hostname_result
+
+    - name: "Toon hostname resultaat"
+      ansible.builtin.debug:
+        msg: "Hostname geconfigureerd: HTTP {{ hostname_result.status }}"
+
+    - name: "Stap 3b - GigabitEthernet2 configureren via RESTCONF"
+      ansible.builtin.uri:
+        url: "{{ restconf_base }}/Cisco-IOS-XE-native:native/interface/GigabitEthernet=2"
+        method: PUT
+        user: "{{ router_user }}"
+        password: "{{ router_pass }}"
+        force_basic_auth: true
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          "Cisco-IOS-XE-native:GigabitEthernet":
+            name: "2"
+            description: "LAN - Geconfigureerd via RESTCONF/Ansible/GitHub"
+            ip:
+              address:
+                primary:
+                  address: "10.10.10.1"
+                  mask: "255.255.255.0"
+        validate_certs: false
+        status_code: [200, 201, 204]
+      register: gi2_result
+
+    - name: "Toon GigabitEthernet2 resultaat"
+      ansible.builtin.debug:
+        msg: "GigabitEthernet2 geconfigureerd: HTTP {{ gi2_result.status }}"
+
+    - name: "Stap 3c - Loopback0 configureren via RESTCONF"
+      ansible.builtin.uri:
+        url: "{{ restconf_base }}/Cisco-IOS-XE-native:native/interface/Loopback=0"
+        method: PUT
+        user: "{{ router_user }}"
+        password: "{{ router_pass }}"
+        force_basic_auth: true
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          "Cisco-IOS-XE-native:Loopback":
+            name: "0"
+            description: "Router-ID Loopback"
+            ip:
+              address:
+                primary:
+                  address: "1.1.1.1"
+                  mask: "255.255.255.255"
+        validate_certs: false
+        status_code: [200, 201, 204]
+      register: lo0_result
+
+    - name: "Toon Loopback0 resultaat"
+      ansible.builtin.debug:
+        msg: "Loopback0 geconfigureerd: HTTP {{ lo0_result.status }}"
+
+    - name: "Stap 3d - OSPF configureren via RESTCONF"
+      ansible.builtin.uri:
+        url: "{{ restconf_base }}/Cisco-IOS-XE-native:native/router/Cisco-IOS-XE-ospf:ospf=1"
+        method: PUT
+        user: "{{ router_user }}"
+        password: "{{ router_pass }}"
+        force_basic_auth: true
+        headers: "{{ headers }}"
+        body_format: json
+        body:
+          "Cisco-IOS-XE-ospf:ospf":
+            id: 1
+            router-id: "1.1.1.1"
+            network:
+              - ip: "192.168.56.0"
+                mask: "0.0.0.255"
+                area: 0
+              - ip: "10.10.10.0"
+                mask: "0.0.0.255"
+                area: 0
+              - ip: "1.1.1.1"
+                mask: "0.0.0.0"
+                area: 0
+        validate_certs: false
+        status_code: [200, 201, 204]
+      register: ospf_result
+
+    - name: "Toon OSPF resultaat"
+      ansible.builtin.debug:
+        msg: "OSPF geconfigureerd: HTTP {{ ospf_result.status }}"
+
+    - name: "Stap 4 - Verificatie via RESTCONF GET"
+      ansible.builtin.uri:
+        url: "{{ restconf_base }}/Cisco-IOS-XE-native:native/hostname"
+        method: GET
+        user: "{{ router_user }}"
+        password: "{{ router_pass }}"
+        force_basic_auth: true
+        headers: "{{ headers }}"
+        validate_certs: false
+        status_code: [200]
+      register: verificatie
+
+    - name: "Toon verificatie"
+      ansible.builtin.debug:
+        msg: "Verificatie geslaagd! Hostname: {{ verificatie.json['Cisco-IOS-XE-native:hostname'] }}"
+
+    - name: "Deployment samenvatting"
+      ansible.builtin.debug:
+        msg:
+          - "========================================"
+          - "Task 39 - RESTCONF Ansible deployment OK"
+          - "GitHub → RESTCONF → IOS-XE"
+          - "Hostname:     MijnRouter"
+          - "GigabitEthernet2: 10.10.10.1/24"
+          - "Loopback0:    1.1.1.1/32"
+          - "OSPF:         Process 1, area 0"
+          - "========================================"
